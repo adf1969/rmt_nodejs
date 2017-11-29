@@ -1,0 +1,26 @@
+{
+  "name": "rmt_nodejs",
+  "version": "1.0.0",
+  "description": "node.js server for handling RMTicket Podio App",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adf1969/rmt_nodejs.git"
+  },
+  "keywords": [
+    "podio",
+    "faye"
+  ],
+  "author": "Andrew Fields",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/adf1969/rmt_nodejs/issues"
+  },
+  "homepage": "https://github.com/adf1969/rmt_nodejs#readme",
+  "dependencies": {
+    "podio-js": "^1.6.1"
+  }
+}
