@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/adf1969/rmt_nodejs#readme",
   "dependencies": {
+    "axios": "0.17.1",
     "podio-js": "^1.6.1"
   }
 }
