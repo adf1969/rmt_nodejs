@@ -13,6 +13,7 @@ var faye = require('faye');
 var async = require('async');
 var axios = require('axios');
 var pino = require('pino')();
+var URI = require('urijs');
 //var Promise = require('es6-promise').Promise;
 
 // Initialize podiojs client
@@ -24,31 +25,7 @@ var taskid2 = 83003342;
 var spaceid = 5731005;
 
 var tasks = ["83000761", "83003342" ];
-
-var podio = new Podio({
-  authType: 'client',
-  clientId: config.clientId,
-  clientSecret: config.clientSecret  
-  }, {
-    apiURL: config.apiURL,
-    enablePushService: true  
-});
-
-var podioS = new Podio({
-  authType: 'client',
-  clientId: config.clientId,
-  clientSecret: config.clientSecret  
-  }, {
-    apiURL: config.apiURL,
-    enablePushService: true  
-});
-
-// Login details
-var podioUser = {
-  username: 'avcorp.rmticket@gmail.com',
-  password: '625-avcrmt',
-  user_id: '',
-};
+var labels = [];
 
 
 // - doesn't work. Podio's docs suck
@@ -79,6 +56,10 @@ process.on('unhandledRejection', (reason, p) => {
   // application specific logging, throwing an error, or other logic here
 });
 
+function isFunction(functionToCheck) {
+ var getType = {};
+ return functionToCheck && getType.toString.call(functionToCheck) === '[object Function]';
+}
 
 function authUser (connection, userInfo, callback) {
   connection.authenticateWithCredentials(userInfo.username, userInfo.password, function() {
@@ -123,7 +104,7 @@ function addSubscriptionToTask(connection, taskId, callback) {
     }).catch(handleError);
 }
 
-function authAndAddSubscriptionToTask(taskId, callback) {
+function getConnection() {
   var connection = new Podio({
     authType: 'client',
     clientId: config.clientId,
@@ -132,6 +113,19 @@ function authAndAddSubscriptionToTask(taskId, callback) {
       apiURL: config.apiURL,
       enablePushService: true  
   });
+  return connection;  
+}
+function authAndAddSubscriptionToTask(taskId, callback) {
+//  var connection = new Podio({
+//    authType: 'client',
+//    clientId: config.clientId,
+//    clientSecret: config.clientSecret  
+//    }, {
+//      apiURL: config.apiURL,
+//      enablePushService: true  
+//  });
+  var connection = getConnection();
+  
   console.log("Auth and Add Subscription to Task: ", taskId);
   userInfo = config.rmticket_user;
   connection.authenticateWithCredentials(userInfo.username, userInfo.password, function() {
@@ -155,81 +149,6 @@ function authAndAddSubscriptionToTask(taskId, callback) {
 }
 
 function onNotificationReceived (notification) {  
-  var eType = notification.data.event;
-  var data = notification.data;
-  switch (eType) {
-    case 'comment_create':
-      pino.info('Comment_Create Notification received!', notification.data);    
-      break;
-    
-    case 'viewing':
-    case 'typing':
-      // Skip these...
-      break;
-      
-    case 'stream_create': // task
-      // called when a Task is created (among other things)
-      // Data you get:
-      //  created_by.type = "user"
-      //  created_by.id = user_id (user id of the creating user)
-      //  data.app_id = app_id (the app id where the task was created)
-      //  data.data_ref.id = task_id
-      //  data.data_ref.type = "task"
-      //  data.context_ref.type = "item" (if it is attached to an item)
-      //  data.context_ref.id = item_id (if attached to an item)
-      //  space_id: the space id where task was created
-      //  data.ref.type = "space"
-      //  data.ref.id = space_id
-      var dataJson = JSON.stringify(data);
-      pino.info('stream_create received!', notification.data);    
-      break;
-      
-    case 'stream_event': // space
-      //  Called when I added a comment to a task that was in a space I was monitoring      
-      //  Data you get:
-      //   data.created_by.type = "user"
-      //   data.created_by.id = user_id (user id of the creating user)
-      //   data.data_ref.type = "comment"
-      //   data.data_ref.id = comment_id      
-      //   data.ref.type = "task"
-      //   data.ref.id = task_id
-      //   data.data.type = "comment"
-      //  Called when I update a task      
-      //  Data you get
-      //   data.ref.type = "task"
-      //   data.ref.id = task_id  
-      //   data.event_id = event_id      
-      //   data.type = "update"
-      //   data.data_ref.type = "task_action"   
-      //   data.data_ref.id = task_id      
-      //   notification.created_by.type = "user"
-      //   notification.created_by.id = user_id (user id of the creating user)
-      //   notification.created_via: 1 (not sure what this means)      
-      //    
-      var dataJson = JSON.stringify(data);
-      var dataType = data.data.type;
-      var dataRefType = data.ref.type;
-      var dataRefId = data.ref.id;
-      pino.info('stream_event received!', notification.data);    
-      break;
-    
-    case 'update': // task
-      // Called when a user updates a task
-      // Data you get:
-      //  created_by.type = "user"
-      //  created_by.id = user_id (user id of the creating user)
-      //  data.data_ref.id = comment_id
-      //  data.data_ref.type = "comment"
-      //  data.ref.type = "task"
-      //  data.ref.id = task_id
-      //  data.type = "comment"
-      
-    default:
-      if (debug) { pino.info('Other Notification received!', notification.data); }
-  }
-}
-
-function broken_onNotificationReceived (notification) {  
   var eType = notification.data.event;
   var data = notification.data;
   switch (eType) {
@@ -284,199 +203,118 @@ function broken_onNotificationReceived (notification) {
   }
 }
 
-// Simple push object for handling a subscription
-var push = {
-  subscription: null,
-  channel: null,
-  messageReceived: function(message) {
-    console.log("New message received: ", message);
 
-    // You probably want to filter out your own messages:
-    if (message.data.created_by.type == 'user' && message.data.created_by.id != podioUser.user_id){
-
-      console.log("message", message);
-      
-      // ... do something.
-
+/**
+ * 
+ * @return {undefined}
+ * 
+ * Gets all the labels of the user/pass passed in userInfo
+ */
+function getUserLabels(userInfo, callback) {
+  if (userInfo == null) {
+    userInfo = config.rmticket_user;
+  }
+  if (userInfo.username in labels) {
+    responseData = labels[userInfo.username];
+    if (isFunction(callback)) { 
+      callback(null, responseData); 
+    } else {
+      return responseData;
     }
+  }
+  
+  var connection = getConnection();
+  authUser(connection, userInfo, 
+    function(err, results) {
+      if (err) { handleError(err); }
+      var userData = results;    
+      console.log("rmticket_user data", userData);
+      var url = new URI('/task/label/');
+      connection.request('get', url.toString())
+        .then(function(responseData) {
+          console.log("Labels: ", responseData);        
+          labels[userInfo.username] = responseData;
+          if (isFunction(callback)) { 
+            callback(null, responseData); 
+          } else {
+            return responseData;
+          }
+        });
+    }); // authUser()
+}
+
+
+/**
+ * 
+ * @param {type} completed
+ * @param {type} page
+ * @param {type} pageSize
+ * @param {type} app_id
+ * @return {undefined}
+ * 
+ * Format for getting a task is:
+ * Get all incomplete tasks in a specific App
+ * /task/?app=#&completed=0&offset=0&sort_by=rank&sort_desc=false
+ * 
+ * Get all incomplete tasks with a specific label (you have to KNOW the Label ID first!)
+ * /task/?app=19864431&completed=0&grouping=label&label=2481588&limit=10&offset=0&sort_by=rank&sort_desc=false
+ */
+function getAllTasks(completed, page, pageSize, app_id) {
+  if (app_id == null) {
+    app_id = config.rmticket_app.id;
+  }
+  var connection = getConnection();
+  authUser(connection, config.rmticket_user, 
+    function(err, results) {
+      if (err) { handleError(err); }
+      var userData = results;    
+      console.log("rmticket_user data", userData);
+      var url = new URI('/task/')
+        .addQuery('app', app_id)
+        .addQuery('completed', completed);
+
+      connection.request('get', url.toString())
+        .then(function(responseData) {
+          console.log("Tasks: ", responseData);        
+          return responseData;
+        });
+    }); // authUser()
+}
+
+//getAllTasks(0, 1, 100);
+
+if (false) {
+async.series([
+  function(callback) {
+    var l1 = getUserLabels(null, callback);
+    console.log("Labels 1:", l1);
   },
-  addSubscription: function(channel) {
-    this.channel = channel;
-    this.subscription = fayeClient.subscribe(this.channel.channel, this.messageReceived);
-
-    this.subscription.then(function(){
-      console.log('Subscription is now active');
-    }, function(error){
-      console.error('Subscription failed: ', error.message, error);
-    });
-
+  function(callback) {
+    var l2 = getUserLabels(null, callback);        
+    console.log("Labels 2:", l2);
   }
-};
-
-// This works, but doesn't get correct events
-if (false) {
-async.parallel([
-  _.partial(authUser, podio, config.rmticket_user)  
-], function(err, results) {
+  ],
+  function(err, results) {
+    console.log("2nd Labels 1:", results[0]);
+    console.log("2nd Labels 2:", results[1]);
+  });
   
-  if (err) { handleError(err); }
-  var user1Data = results[0];    
-  console.log("rmticket_user data", user1Data);
-  
-  // Get Task 1
-  if (false) {
-    podio.request('get', '/task/' + taskid, {})
-      .then(function(responseData){
-        console.log("Task responseData", responseData);
-        podio.push(responseData.push).subscribe(onNotificationReceived)
-          .then(function() {
-            console.log('Added subscription to taskid ', taskid);
-          }).catch(handleError);
-      }).catch(handleError);
-  }
-    
-  // Get Task 2
-  if (false) {
-    podio.request('get', '/task/' + taskid2, {})
-      .then(function(responseData){
-        console.log("Task responseData2", responseData);
-        podio.push(responseData.push).subscribe(onNotificationReceived)
-          .then(function() {
-            console.log('Added subscription to taskid2 ', taskid2);
-          }).catch(handleError);
-      }).catch(handleError);
-  }
-    
-  // Get Space
-  if (false) {
-    podioS.request('get', '/space/' + spaceid, {})
-      .then(function(responseData){
-        console.log("Space responseData", responseData);
-        podioS.push(responseData.push).subscribe(onNotificationReceived)
-          .then(function() {
-            console.log('Added subscription to spaceid', spaceid);
-          }).catch(handleError);
-      }).catch(handleError);
-  }
-});
-} // UNUSED
-
-// This works, but doesn't get correct events
-// Add Space Subscription - this will get all stream_event events
-if (false) {
-async.parallel([
-  _.partial(authUser, podioS, config.rmticket_user)  
-], function(err, results) {
-  
-  if (err) { handleError(err); }
-//  var user1Data = results[0];    
-//  pino.info("rmticket_user data", user1Data);
-     
-  // Get Space  
-  podioS.request('get', '/space/' + config.spaceId, {})
-    .then(function(responseData){
-      console.log("Space responseData", responseData);
-      podioS.push(responseData.push).subscribe(onNotificationReceived)
-        .then(function() {
-          console.log('Added subscription to spaceid', config.spaceId);
-        }).catch(handleError);
-    }).catch(handleError);
-
-});
 }
 
 
+// NOTE - because of how getUserLabels works, it will AUTO-RETURN as soon as it runs
+// unless you pass (null, callback) - then it will run callback once it returns
+// I should probably make this a Promise? Then I can add a .then() to it.
+//
+var l1 = getUserLabels();
+console.log("Labels 1:", l1);
 
 
+//var l1 = getUserLabels();
+//var l2 = getUserLabels();
 
 
-//testMultiTasks();
-function testMultiTasks() {
-  console.log("Starting: testMultiTasks");
-  async.parallel([
-      _.partial(authUser, podio, config.rmticket_user)  
-    ], function(err, results) {
-
-    if (err) { handleError(err); }
-    var user1Data = results[0];    
-    console.log("rmticket_user data", user1Data);
-
-    // Process all tasks
-    var sequence = Promise.resolve();
-    
-    tasks.forEach(function(taskId) {      
-      sequence = sequence.then(function() {
-      console.log("Process Task: ", taskId);
-      podio.request('get', '/task/' + taskid, {})
-        .then(function(err, responseData){
-          //console.log("Task responseData", responseData);
-          podio.push(responseData.push).subscribe(onNotificationReceived)
-            .then(function() {
-              console.log('Added subscription to taskid ', taskid);
-            }).catch(handleError);
-        }).catch(handleError);
-      }).catch(handleError);
-    });
-
-  }); // async.parallel
-}
-
-//testMultiTasks2();
-function testMultiTasks2() {
-  console.log("Starting: testMultiTasks2");
-  authUser(podio, config.rmticket_user, 
-    function(err, results) {
-      if (err) { handleError(err); }
-      var userData = results;    
-      console.log("rmticket_user data", userData);
-
-      // Process all tasks
-      var sequence = Promise.resolve();
-
-      tasks.forEach(function(taskId) {      
-        sequence = sequence.then(function() {
-        console.log("Process Task: ", taskId);
-        podio.request('get', '/task/' + taskId, {})
-          .then(function(responseData){
-            console.log("Task responseData", responseData);
-            podio.push(responseData.push).subscribe(onNotificationReceived)
-              .then(function() {
-                console.log('Added subscription to taskid ', taskId);
-              }).catch(handleError);
-          }).catch(handleError);
-        }).catch(handleError);
-      });
-  }); // authUser
-  
-}
-
-//testMultiTasks3();
-function testMultiTasks3() {
-  console.log("Starting: testMultiTasks3");
-  authUser(podio, config.rmticket_user, 
-    function(err, results) {
-      if (err) { handleError(err); }
-      var userData = results;    
-      console.log("rmticket_user data", userData);
-
-      // Process all tasks      
-      async.eachSeries(tasks, function(taskId, callback) {
-        console.log("Process ", taskId);
-        addSubscriptionToTask(podio, taskId, callback);
-        //callback();
-      }, function(err) {
-        if (err) {
-          console.log("Error processing tasks", err);
-        } else {
-          console.log("All tasks processed successfully.");
-        }
-      }); // async.eachSeries()
-      
-    }); // authUser
-  
-}
-
-testMultiTasks4();
+//testMultiTasks4();
 function testMultiTasks4() {
   console.log("Starting: testMultiTasks4");
 

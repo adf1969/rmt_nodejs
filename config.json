@@ -2,6 +2,10 @@
   "spaceId": "5731005", 
   "clientId": "rmticket-process",
   "clientSecret": "65vwW1gRqqzgRxEPFZqT7WylFR5YnRI0xYTvEN4ZgsuwdKuAwii9IjzMokSjlROs",
+  "rmticket_app": {
+    "id":"19864431",
+    "token":"175e1ee80b7e44dab8a6b6a394740ef1"
+  },
   "rmticket_user": {
     "username": "avcorp.rmticket@gmail.com",
     "password": "625-avcrmt"
