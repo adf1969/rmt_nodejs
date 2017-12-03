@@ -7,6 +7,7 @@
 
 var debug = true;
 var fs = require('fs');
+var util = require('util');
 var _ = require('lodash');
 var http = require('http');
 var faye = require('faye');  
@@ -46,9 +47,20 @@ fayeClient.addExtension({
   }
 });
 
+
+//----------------------------------------------------------------------------\\
+//                                                                            \\
+//                      FUNCTIONS                                             \\
+//                                                                            \\
+//                                                                            \\
+                                                                            
+                                                                            
+//<editor-fold defaultstate="collapsed" desc="Error Handling">
+
 function handleError (err) {
   console.log("error", err);
 }
+
 
 process.on('unhandledRejection', (reason, p) => {
   //console.log('Unhandled Rejection at: Promise', p, 'reason:', reason);
@@ -56,10 +68,104 @@ process.on('unhandledRejection', (reason, p) => {
   // application specific logging, throwing an error, or other logic here
 });
 
+//</editor-fold> Error Handling ----------------------------------------- \\
+
+//<editor-fold defaultstate="collapsed" desc="Utility">
+
+
 function isFunction(functionToCheck) {
  var getType = {};
  return functionToCheck && getType.toString.call(functionToCheck) === '[object Function]';
 }
+
+/**
+ * This function allow you to modify a JS Promise by adding some status properties.
+ * Based on: http://stackoverflow.com/questions/21485545/is-there-a-way-to-tell-if-an-es6-promise-is-fulfilled-rejected-resolved
+ * But modified according to the specs of promises : https://promisesaplus.com/
+ */
+function makeQPromise(promise) {
+    // Don't modify any promise that has been already modified.
+    if (promise.isResolved) return promise;
+
+    // Set initial state
+    var isPending = true;
+    var isRejected = false;
+    var isFulfilled = false;
+
+    // Observe the promise, saving the fulfillment in a closure scope.
+    var result = promise.then(
+        function(v) {
+            isFulfilled = true;
+            isPending = false;
+            return v; 
+        }, 
+        function(e) {
+            isRejected = true;
+            isPending = false;
+            throw e; 
+        }
+    );
+
+    result.isFulfilled = function() { return isFulfilled; };
+    result.isPending = function() { return isPending; };
+    result.isRejected = function() { return isRejected; };
+    return result;
+}
+
+// sleep time expects milliseconds
+// Usage:
+//  sleep(500).then(() => {
+//    // do something
+//  }
+//
+function sleep (time) {
+  return new Promise((resolve) => setTimeout(resolve, time));
+}
+
+// Sleep for a set duration (in milliseconds)
+// Usage:
+//  function sleepThenAct(){ 
+//    sleepFor(2000); 
+//    console.log("hello js sleep !"); 
+//  }
+//
+function sleepFor( sleepDuration ){
+    var now = new Date().getTime();
+    while(new Date().getTime() < now + sleepDuration){ /* do nothing */ } 
+}
+
+// Sleep until the Promise is FULLFILLED
+// Usage:
+//  
+function sleepUntilPromised(varPromise) {
+  var qPromise = makeQPromise(varPromise);
+  while (!qPromise.isFulfilled()) {
+    sleepFor(500);    
+  }
+  return qPromise;  
+}
+
+//</editor-fold> Utility  ----------------------------------------- \\
+
+//<editor-fold defaultstate="collapsed" desc="Podio Config">
+
+function getConnection() {
+  var connection = new Podio({
+    authType: 'client',
+    clientId: config.clientId,
+    clientSecret: config.clientSecret  
+    }, {
+      apiURL: config.apiURL,
+      enablePushService: true  
+  });  
+  return connection;  
+}
+
+//</editor-fold> Podio Config  ----------------------------------------- \\
+
+//<editor-fold defaultstate="collapsed" desc="Podio Auth">
+
+
 
 function authUser (connection, userInfo, callback) {
   connection.authenticateWithCredentials(userInfo.username, userInfo.password, function() {
@@ -72,6 +178,83 @@ function authUser (connection, userInfo, callback) {
   })
 }
 
+function authUserIsAuth(connection, userInfo, callback) {
+  connection.isAuthenticated().then(function() {
+    callback(null, responseData);
+  }).catch(function(err) {
+    connection.authenticateWithCredentials(userInfo.username, userInfo.password, function() {
+      callback(null);
+    });
+  });  
+}
+
+
+
+//// AUTH TESTING \\\\
+//
+// BROKEN \\
+function authUserSync (connection, userInfo) {
+  async.series([
+    async function(callback) {
+      await new Promise(function(resolve, reject) {        
+        connection.authenticateWithCredentials(userInfo.username, userInfo.password);
+        resolve();
+      });      
+      //callback(null);
+    },
+    async function(callback) {
+      let respData = await connection.request('get','/user/status');
+      //callback(null, respData);
+    }],
+    function(err, results) {
+      return results[1];
+    }); // async.series[]
+}
+
+
+async function authUserSync2 (connection, userInfo) {
+  let ret = await new Promise(async function(resolve, reject) { 
+    await connection.authenticateWithCredentials(userInfo.username, userInfo.password);
+    resolve();
+  });
+  var retVal = connection.isAuthenticated();
+  return retVal;
+}
+
+async function authUserSync3 (connection, userInfo) {
+  const authenticateWithCredentials = util.promisify(connection.authenticateWithCredentials);
+  await authenticateWithCredentials(userInfo.username, userInfo.password)
+    .then(resp => {return resp;}
+    ).catch(handleError);
+}
+
+
+if (false) {
+  var conn = getConnection();
+  var ud = authUserSync3(conn, config.rmticket_user);
+  //var ud = makeQPromise(authUserSync3(conn, config.rmticket_user));
+  //console.log("ud.isFullfilled: ", ud.isFulfilled());
+  //sleepFor(5000);
+  //console.log("ud.isFullfilled: ", ud.isFulfilled());
+  console.log("ud: ", ud);
+}
+
+
+//</editor-fold> Podio Auth  ----------------------------------------- \\
+
+//<editor-fold defaultstate="collapsed" desc="Podio Tasks">
+
+
+function getUniqueTaskIds(tasks) {
+  var taskIds = [];
+  for (let task of tasks) {
+    if (!taskIds.includes(task.task_id)) {
+      taskIds.push(task.task_id);
+    }
+  }
+  return taskIds;
+}
+
 function getTask(connection, taskId) {
   console.log("Process Task: ", taskId);
   connection.request('get', '/task/' + taskid, {})
@@ -80,6 +263,221 @@ function getTask(connection, taskId) {
       return responseData;
     }).catch(handleError);
 }
+
+/**
+ * 
+ * @param {type} completed
+ * @param {type} page
+ * @param {type} pageSize
+ * @param {type} app_id
+ * @return {undefined}
+ * 
+ * Format for getting a task is:
+ * Get all incomplete tasks in a specific App
+ * /task/?app=#&completed=0&offset=0&sort_by=rank&sort_desc=false
+ * 
+ * Get all incomplete tasks with a specific label (you have to KNOW the Label ID first!)
+ * /task/?app=19864431&completed=0&grouping=label&label=2481588&limit=10&offset=0&sort_by=rank&sort_desc=false
+ */
+function getAllTasks(completed, page, pageSize, app_id) {
+  if (app_id == null) {
+    app_id = config.rmticket_app.id;
+  }
+  var connection = getConnection();
+  authUser(connection, config.rmticket_user, 
+    function(err, results) {
+      if (err) { handleError(err); }
+      var userData = results;    
+      console.log("rmticket_user data", userData);
+      var url = new URI('/task/')
+        .addQuery('app', app_id)
+        .addQuery('completed', completed);
+
+      connection.request('get', url.toString())
+        .then(function(responseData) {
+          console.log("Tasks: ", responseData);        
+          return responseData;
+        });
+    }); // authUser()
+}
+
+
+///// TASK TESTING \\\\\
+//getAllTasks(0, 1, 100);
+
+if (false) {
+async.series([
+  function(callback) {
+    var l1 = getUserLabels(null, callback);
+    console.log("Labels 1:", l1);
+  },
+  function(callback) {
+    var l2 = getUserLabels(null, callback);        
+    console.log("Labels 2:", l2);
+  }
+  ],
+  function(err, results) {
+    console.log("2nd Labels 1:", results[0]);
+    console.log("2nd Labels 2:", results[1]);
+  });
+  
+}
+
+//</editor-fold> Podio Tasks  ----------------------------------------- \\
+
+
+//<editor-fold defaultstate="collapsed" desc="Task Labels">
+
+// Given an array of labels userLabels, get the LabelID of labelText
+function getLabelId(userLabels, labelText) {
+  for (let label of userLabels) {
+    if (label.text == labelText) {
+      return label.label_id;
+    }
+  }
+  return null;
+}
+
+function getUserLabelsP(connection, userInfo) {
+  if (userInfo == null) {
+    userInfo = config.rmticket_user;
+  }
+  if (connection == null) {
+    var connection = getConnection();  
+  }
+  console.log("getUserLabelsP: ", userInfo);
+
+  var url = new URI('/task/label/');      
+  connection.request('get', url.toString())
+    .then(function(responseData) {
+      return new Promise(function (resolve, reject) {
+        resolve(responseData);
+      });
+    }).catch(handleError);
+
+};
+
+function getUserLabels2(connection, userInfo) {
+  if (userInfo == null) {
+    userInfo = config.rmticket_user;
+  }
+  if (connection == null) {
+    var connection = getConnection();  
+  }
+  console.log("getUserLabels2: ", userInfo);  
+  connection.isAuthenticated()
+    .then(function() {
+      var url = new URI('/task/label/');      
+      connection.request('get', url.toString())
+        .then(function(responseData) {
+          return responseData;
+        }).catch(handleError);
+      }).catch(handleError);      
+}
+
+/**
+ * 
+ * @return {undefined}
+ * 
+ * Gets all the labels of the user/pass passed in userInfo
+ */
+function getUserLabels(userInfo, callback) {
+  if (userInfo == null) {
+    userInfo = config.rmticket_user;
+  }
+  if (userInfo.username in labels) {
+    responseData = labels[userInfo.username];
+    if (isFunction(callback)) { 
+      callback(null, responseData); 
+    } else {
+      return responseData;
+    }
+  }
+  
+  var connection = getConnection();
+  authUser(connection, userInfo, 
+    function(err, results) {
+      if (err) { handleError(err); }
+      var userData = results;    
+      console.log("rmticket_user data", userData);
+      var url = new URI('/task/label/');
+      connection.request('get', url.toString())
+        .then(function(responseData) {
+          console.log("Labels: ", responseData);        
+          labels[userInfo.username] = responseData;
+          if (isFunction(callback)) { 
+            callback(null, responseData); 
+          } else {
+            return responseData;
+          }
+        });
+    }); // authUser()
+}
+
+function getUserLabelsSync(userInfo) {
+  if (userInfo == null) {
+    userInfo = config.rmticket_user;
+  }
+  if (userInfo.username in labels) {
+    responseData = labels[userInfo.username];
+    return responseData;
+  }  
+  var connection = getConnection();
+  authUser(connection, userInfo, 
+    function(err, results) {
+      if (err) { handleError(err); }
+      var userData = results;    
+      console.log("rmticket_user data", userData);
+      var url = new URI('/task/label/');
+      connection.request('get', url.toString())
+        .then(function(responseData) {
+          console.log("Labels: ", responseData);        
+          labels[userInfo.username] = responseData;
+          return responseData;
+        });
+    }); // authUser()
+}
+
+//// LABEL TESTING \\\\
+// NOTE - because of how getUserLabels works, it will AUTO-RETURN as soon as it runs
+// unless you pass (null, callback) - then it will run callback once it returns
+// I should probably make this a Promise? Then I can add a .then() to it.
+//
+if (false) {
+var l1 = getUserLabels();
+console.log("Labels 1:", l1);
+}
+
+//testGetUsersLabelsSync();
+function testGetUserLabelsSync() {
+  var connection = getConnection();
+  authUser(connection, config.rmticket_user, 
+    function(err, results) {
+      if (err) { handleError(err); }
+      var userData = results;    
+      console.log("rmticket_user data", userData);
+      var url = new URI('/task/')
+        .addQuery('app', app_id)
+        .addQuery('completed', completed);
+
+      connection.request('get', url.toString())
+        .then(function(responseData) {
+          console.log("Tasks: ", responseData);        
+          return responseData;
+        });
+    }); // authUser()  
+}
+
+//var l1 = getUserLabels();
+//var l2 = getUserLabels();
+
+
+//</editor-fold> Task Labels  ----------------------------------------- \\
+
+
+//<editor-fold defaultstate="collapsed" desc="Podio Push Subscriptions">
+
+
 
 function addSubscription(connection, taskId) {
   console.log("Process Task: ", taskId);
@@ -104,49 +502,141 @@ function addSubscriptionToTask(connection, taskId, callback) {
     }).catch(handleError);
 }
 
-function getConnection() {
-  var connection = new Podio({
-    authType: 'client',
-    clientId: config.clientId,
-    clientSecret: config.clientSecret  
-    }, {
-      apiURL: config.apiURL,
-      enablePushService: true  
-  });
-  return connection;  
-}
 function authAndAddSubscriptionToTask(taskId, callback) {
-//  var connection = new Podio({
-//    authType: 'client',
-//    clientId: config.clientId,
-//    clientSecret: config.clientSecret  
-//    }, {
-//      apiURL: config.apiURL,
-//      enablePushService: true  
-//  });
-  var connection = getConnection();
-  
+  var connection = getConnection();  
   console.log("Auth and Add Subscription to Task: ", taskId);
   userInfo = config.rmticket_user;
-  connection.authenticateWithCredentials(userInfo.username, userInfo.password, function() {
-    console.log("Get User Status to Auth");
-    connection.request('get','/user/status')
-      .then(function(responseData) {
-        console.log("User data: ", responseData);
-        console.log("Get Task: ", taskId);
-        connection.request('get', '/task/' + taskId, {})
-          .then(function(responseData){
-            //console.log("Task responseData", responseData);
-            console.log("responseData.push", responseData.push);
-            connection.push(responseData.push).subscribe(onNotificationReceived)
-              .then(function() {
-                console.log('Added subscription to taskid ', taskId);          
-                callback();
-              }).catch(handleError);
+  
+  // this 1 line
+  authUserIsAuth(connection, userInfo, () => addSubscription(taskId, callback));
+  // replaces all these lines
+//  connection.isAuthenticated().then(function() {
+//    addSubscriptions(taskId, callback);
+//  }).catch(function(err) {
+//    connection.authenticateWithCredentials(userInfo.username, userInfo.password, function() {
+//      addSubscriptions(taskId, callback);
+//    });
+//  });
+  
+  function addSubscription(taskId, callback) {
+    console.log("addSubscription: ", taskId)
+    connection.request('get', '/task/' + taskId, {})
+      .then(function(responseData){
+        //console.log("Task responseData", responseData);
+        console.log("responseData.push", responseData.push);
+        connection.push(responseData.push).subscribe(onNotificationReceived)
+          .then(function() {
+            console.log('Added subscription to taskid ', taskId);
+            callback();
           }).catch(handleError);
+      }).catch(handleError);
+  }; 
+} // authAndAddSubscriptionToTask
+
+
+//testMultiTasks4();
+function testMultiTasks4() {
+  console.log("Starting: testMultiTasks4");
+
+  // Process all tasks      
+  async.eachSeries(tasks, function(taskId, callback) {
+    console.log("Process ", taskId);
+    authAndAddSubscriptionToTask(taskId, callback);
+    //callback();
+  }, function(err) {
+    if (err) {
+      console.log("Error processing tasks", err);
+    } else {
+      console.log("All tasks processed successfully.");
+    }
+  }); // async.eachSeries()
+  
+}
+
+
+
+//</editor-fold> Podio Push Subscriptions  ----------------------------------------- \\
+
+
+
+
+
+//<editor-fold defaultstate="collapsed" desc="Event Processing">
+
+onRunSetup();
+
+/**
+ * Routine called to setup the various subscriptions
+ * 
+ * @return {undefined}
+ */
+function onRunSetup() {  
+  userInfo = config.rmticket_user;
+  var connection = getConnection();
+  var options = {
+    connection: connection,
+    labelFilter: 'RF2',
+    appId: config.rmticket_app.id,
+    completed: 0
+    };
+  authUser(connection, userInfo, 
+    function(err, results) {
+      if (err) { handleError(err); }  
+      // GET LABELS
+      var url = new URI('/task/label/');      
+      connection.request('get', url.toString())     
+      .then(function(responseData) {
+        // PROCESS LABELS
+        options.userLabels = responseData;        
+        console.log("1 options:", options);
+        return options;
+      })
+      .then(function(options) {
+        console.log("2 options:", options);
+        var userLabels = options.userLabels;
+        // Get the label we care about
+        var labelFilterId = getLabelId(userLabels, options.labelFilter);
+        console.log("2 labelFilterId", labelFilterId);
+        // /task/?app=19864431&completed=0&grouping=label&label=2481588&limit=10&offset=0&sort_by=rank&sort_desc=false
+        var app_id = config.rmticket_app.id;
+        var url = new URI('/task/')
+          .addQuery('app', options.appId)
+          .addQuery('completed', options.completed)
+          .addQuery('limit', 100)
+          .addQuery('offset', 0);
+        if (labelFilterId != null) {
+          url.addQuery('grouping', 'label')
+            .addQuery('label', labelFilterId);
+        }          
+        // GET TASKS
+        connection.request('get', url.toString())
+        .then(function(responseData) {
+          // PROCESS TASKS
+          options.tasks = responseData;
+          console.log("3 options:", options);
+          var taskIds = getUniqueTaskIds(options.tasks);
+          console.log("3 taskIds", taskIds);
+
+          // Add the Subscriptions
+          // Process all tasks      
+          async.eachSeries(taskIds, function(taskId, callback) {
+            console.log("3 Process TaskId ", taskId);
+            authAndAddSubscriptionToTask(taskId, callback);
+            //callback();
+          }, function(err) {
+            if (err) {
+              console.log("3 Error processing tasks", err);
+            } else {
+              console.log("3 All tasks processed successfully.");
+            }
+          }); // async.eachSeries()       
+        });
       }).catch(handleError);
   });
 }
+
+
+//<editor-fold defaultstate="collapsed" desc="Notification Events">
 
 function onNotificationReceived (notification) {  
   var eType = notification.data.event;
@@ -203,134 +693,12 @@ function onNotificationReceived (notification) {
   }
 }
 
+//</editor-fold> Events  ----------------------------------------- \\
 
-/**
- * 
- * @return {undefined}
- * 
- * Gets all the labels of the user/pass passed in userInfo
- */
-function getUserLabels(userInfo, callback) {
-  if (userInfo == null) {
-    userInfo = config.rmticket_user;
-  }
-  if (userInfo.username in labels) {
-    responseData = labels[userInfo.username];
-    if (isFunction(callback)) { 
-      callback(null, responseData); 
-    } else {
-      return responseData;
-    }
-  }
-  
-  var connection = getConnection();
-  authUser(connection, userInfo, 
-    function(err, results) {
-      if (err) { handleError(err); }
-      var userData = results;    
-      console.log("rmticket_user data", userData);
-      var url = new URI('/task/label/');
-      connection.request('get', url.toString())
-        .then(function(responseData) {
-          console.log("Labels: ", responseData);        
-          labels[userInfo.username] = responseData;
-          if (isFunction(callback)) { 
-            callback(null, responseData); 
-          } else {
-            return responseData;
-          }
-        });
-    }); // authUser()
-}
+//</editor-fold> Event Processing  ----------------------------------------- \\
 
 
-/**
- * 
- * @param {type} completed
- * @param {type} page
- * @param {type} pageSize
- * @param {type} app_id
- * @return {undefined}
- * 
- * Format for getting a task is:
- * Get all incomplete tasks in a specific App
- * /task/?app=#&completed=0&offset=0&sort_by=rank&sort_desc=false
- * 
- * Get all incomplete tasks with a specific label (you have to KNOW the Label ID first!)
- * /task/?app=19864431&completed=0&grouping=label&label=2481588&limit=10&offset=0&sort_by=rank&sort_desc=false
- */
-function getAllTasks(completed, page, pageSize, app_id) {
-  if (app_id == null) {
-    app_id = config.rmticket_app.id;
-  }
-  var connection = getConnection();
-  authUser(connection, config.rmticket_user, 
-    function(err, results) {
-      if (err) { handleError(err); }
-      var userData = results;    
-      console.log("rmticket_user data", userData);
-      var url = new URI('/task/')
-        .addQuery('app', app_id)
-        .addQuery('completed', completed);
-
-      connection.request('get', url.toString())
-        .then(function(responseData) {
-          console.log("Tasks: ", responseData);        
-          return responseData;
-        });
-    }); // authUser()
-}
-
-//getAllTasks(0, 1, 100);
-
-if (false) {
-async.series([
-  function(callback) {
-    var l1 = getUserLabels(null, callback);
-    console.log("Labels 1:", l1);
-  },
-  function(callback) {
-    var l2 = getUserLabels(null, callback);        
-    console.log("Labels 2:", l2);
-  }
-  ],
-  function(err, results) {
-    console.log("2nd Labels 1:", results[0]);
-    console.log("2nd Labels 2:", results[1]);
-  });
-  
-}
 
 
-// NOTE - because of how getUserLabels works, it will AUTO-RETURN as soon as it runs
-// unless you pass (null, callback) - then it will run callback once it returns
-// I should probably make this a Promise? Then I can add a .then() to it.
-//
-var l1 = getUserLabels();
-console.log("Labels 1:", l1);
-
-
-//var l1 = getUserLabels();
-//var l2 = getUserLabels();
-
-
-//testMultiTasks4();
-function testMultiTasks4() {
-  console.log("Starting: testMultiTasks4");
-
-  // Process all tasks      
-  async.eachSeries(tasks, function(taskId, callback) {
-    console.log("Process ", taskId);
-    authAndAddSubscriptionToTask(taskId, callback);
-    //callback();
-  }, function(err) {
-    if (err) {
-      console.log("Error processing tasks", err);
-    } else {
-      console.log("All tasks processed successfully.");
-    }
-  }); // async.eachSeries()
-  
-}
 
 console.log("rmt_nodejs finished loading.");
